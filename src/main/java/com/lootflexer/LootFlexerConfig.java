@@ -20,7 +20,7 @@ public interface LootFlexerConfig extends Config
 			name = "Minimum Value (GP)",
 			description = "Only trigger notifications for items with a GE price above this threshold",
 			position = 2)
-	@Range(min = 1000000, max = Integer.MAX_VALUE)
+	@Range(min = 10000, max = Integer.MAX_VALUE)
 	default int getMinValue() {
 		return 1000000;
 	}

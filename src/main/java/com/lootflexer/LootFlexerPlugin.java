@@ -54,13 +54,13 @@ public class LootFlexerPlugin extends Plugin
 	private static final HttpClient HTTP_CLIENT = HttpClient.newHttpClient();
 
 	@Override
-	protected void startUp() throws Exception
+	protected void startUp()
 	{
 		log.debug("Loot Flexer started!");
 	}
 
 	@Override
-	protected void shutDown() throws Exception
+	protected void shutDown()
 	{
 		log.debug("Loot Flexer stopped!");
 	}
@@ -81,13 +81,17 @@ public class LootFlexerPlugin extends Plugin
 			if (itemId == -1) return;
 
 			ItemComposition def = client.getItemDefinition(itemId);
+			log.debug(String.format("got drop: %s",def.getName()));
 			int gePrice = itemManager.getItemPrice(itemId);
             int totalValue = gePrice * quantity;
-			if (totalValue < config.getMinValue()) return;
+			if (totalValue < config.getMinValue()) {
+				log.debug(String.format("Skipping drop: Value of %d is below threshold of %d",totalValue,config.getMinValue()));
+				continue;
+			}
 
 			String webhookUrl = config.getWebhookUrl();
 			if (webhookUrl == null || webhookUrl.trim().isEmpty()) {
-				log.debug("Skipping drop: No webhook URL configured");
+				log.debug("Skipping drops: No webhook URL configured");
 				return;
 			}
 
