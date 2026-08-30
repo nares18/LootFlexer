@@ -4,6 +4,7 @@ import com.google.inject.Provides;
 import javax.inject.Inject;
 import lombok.extern.slf4j.Slf4j;
 import net.runelite.api.Client;
+import net.runelite.client.RuneLite;
 import net.runelite.client.config.ConfigManager;
 import net.runelite.client.eventbus.Subscribe;
 import net.runelite.client.events.NpcLootReceived;
@@ -102,7 +103,10 @@ public class LootFlexerPlugin extends Plugin
 					executor.submit(() -> {
 						try {
 							boolean success = false;
-							Path tempFile = Files.createTempFile("drop_", ".png");
+							Path pluginDir = RuneLite.PLUGINS_DIR.toPath().resolve("loot-flexer");
+							Files.createDirectories(pluginDir);
+							Path tempFile = Files.createTempFile(pluginDir, "drop_", ".png");
+							log.debug(String.format("Screenshot location: %s",tempFile.toAbsolutePath()));
 							// 3. Translate the BufferedImage into a PNG file
 							// Cast the generic Image to a BufferedImage (which implements RenderedImage)
 							if (image instanceof BufferedImage) {
