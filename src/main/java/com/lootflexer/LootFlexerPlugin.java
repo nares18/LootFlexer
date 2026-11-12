@@ -19,8 +19,6 @@ import okhttp3.*;
 import java.awt.image.BufferedImage;
 import java.io.ByteArrayOutputStream;
 import java.io.IOException;
-import java.nio.file.Files;
-import java.nio.file.Path;
 import javax.imageio.ImageIO;
 import java.util.Collection;
 import java.util.Random;
