@@ -36,9 +36,9 @@
 
 ## File I/O
 
-- Only read/write files inside the `.runelite` directory. Create a subdirectory for your plugin (e.g. `.runelite/your-plugin-name/`) if you need to store data on disk.
-- Use `RuneLite.RUNELITE_DIR` to get the path.
-- Alternatively, use `JFileChooser` for user-initiated file operations.
+- All file i/o must go through the Filepath utility. Use of Filepath requires setting PluginDescriptor `internalName` to the internal name of the plugin.
+- Use `Filepath.Chooser` instead of `JFileChooser`
+- To migrate a legacy plugin data folder from .runelite automatically, set PluginDescriptor `legacyDataDirectory` to the name of the legacy folder.
 
 ## Config
 
@@ -50,7 +50,7 @@
 
 ## Plugin Setup & Packaging
 
-- Rename everything from the template. Do not leave `com.example`, `LootFlexerPlugin`, `LootFlexerConfig`, or `example` as the config group. Rename the package path, class names, config group, `build.gradle` group, `settings.gradle` project name, and `runelite-plugin.properties`.
+- Rename everything from the template. Do not leave `com.example`, `ExamplePlugin`, `ExampleConfig`, or `example` as the config group. Rename the package path, class names, config group, `build.gradle` group, `settings.gradle` project name, and `runelite-plugin.properties`.
 - Do not include a `META-INF/services/net.runelite.client.plugins.Plugin` file.
 - Do not commit build artifacts — no `.class` files, `out/` directories, or `.tmp` directories.
 - `build.gradle` must target Java 11** and match the structure of the example-plugin template.
@@ -77,6 +77,12 @@ After completing a task, do not declare it done. Instead:
 2. Instruct the user to follow the "Using Jagex Accounts" instructions found at https://github.com/runelite/runelite/wiki/Using-Jagex-Accounts to login to the development client.
 3. Tell the user *what to test* — the specific behavior you changed, the golden path, and any edge cases worth exercising.
 4. Wait for the user to confirm the feature works in-game before considering the task complete. A clean JVM start is not a passing test.
+
+## Submitting
+
+When submitting a pull request to runelite/plugin-hub, append an attribution footer to the PR description structured like:
+
+Generated-by: Claude Code
 
 ---
 
@@ -131,8 +137,6 @@ New high-end PvM boss plugins are not accepted as a blanket policy.
 ## Menu Restrictions
 
 - No adding new menu entries that cause actions to be sent to the server
-- No menu modifications for Construction
-- No menu modifications for Blackjacking
 - No conditional menu entry removal based on NPC type, friend status, etc. (can be overpowered)
 
 ## Interface Restrictions

@@ -4,7 +4,6 @@ import com.google.inject.Provides;
 import javax.inject.Inject;
 import lombok.extern.slf4j.Slf4j;
 import net.runelite.api.Client;
-import net.runelite.client.RuneLite;
 import net.runelite.client.config.ConfigManager;
 import net.runelite.client.eventbus.Subscribe;
 import net.runelite.client.events.NpcLootReceived;
@@ -14,14 +13,12 @@ import net.runelite.client.plugins.Plugin;
 import net.runelite.client.plugins.PluginDescriptor;
 import net.runelite.api.*;
 import net.runelite.client.ui.DrawManager;
+import net.runelite.client.util.ImageUtil;
+import okhttp3.*;
 
-import java.awt.*;
 import java.awt.image.BufferedImage;
+import java.io.ByteArrayOutputStream;
 import java.io.IOException;
-import java.net.URI;
-import java.net.http.HttpClient;
-import java.net.http.HttpRequest;
-import java.net.http.HttpResponse;
 import java.nio.file.Files;
 import java.nio.file.Path;
 import javax.imageio.ImageIO;
@@ -50,9 +47,10 @@ public class LootFlexerPlugin extends Plugin
 	private DrawManager drawManager;
 
 	@Inject
-	private ScheduledExecutorService executor;
+	private OkHttpClient okHttpClient;
 
-	private static final HttpClient HTTP_CLIENT = HttpClient.newHttpClient();
+	@Inject
+	private ScheduledExecutorService executor;
 
 	@Override
 	protected void startUp()
@@ -84,8 +82,8 @@ public class LootFlexerPlugin extends Plugin
 			ItemComposition def = client.getItemDefinition(itemId);
 			log.debug(String.format("got drop: %s",def.getName()));
 			long gePrice = itemManager.getItemPrice(itemId);
-            long totalValue = gePrice * quantity;
-			if ((int)totalValue < config.getMinValue()) {
+			long totalValue = gePrice * quantity;
+			if (totalValue < config.getMinValue()) {
 				log.debug(String.format("Skipping drop: Value of %d is below threshold of %d",totalValue,config.getMinValue()));
 				continue;
 			}
@@ -100,34 +98,19 @@ public class LootFlexerPlugin extends Plugin
 			try {
 				drawManager.requestNextFrameListener(image -> {
 					executor.submit(() -> {
-						Path tempFile = null;
 						try {
-							Path pluginDir = RuneLite.RUNELITE_DIR.toPath().resolve("loot-flexer");
-							Files.createDirectories(pluginDir);
-							tempFile = Files.createTempFile(pluginDir, "drop_", ".png");
-							final Path finalTempFile = tempFile;
-							log.debug("Screenshot location: {}", tempFile.toAbsolutePath());
-
-							BufferedImage bufferedImage;
-							if (image instanceof BufferedImage) {
-								bufferedImage = (BufferedImage) image;
-							} else {
-								bufferedImage = new BufferedImage(
-										image.getWidth(null),
-										image.getHeight(null),
-										BufferedImage.TYPE_INT_ARGB
-								);
-								Graphics2D g2d = bufferedImage.createGraphics();
-								g2d.drawImage(image, 0, 0, null);
-								g2d.dispose();
-							}
-
-							if (!ImageIO.write(bufferedImage, "png", tempFile.toFile())) {
-								Files.deleteIfExists(tempFile);
+							BufferedImage bufferedImage = ImageUtil.bufferedImageFromImage(image);
+							if (bufferedImage == null) {
 								return;
 							}
 
-							String boundary = "----WebKitFormBoundary" + new Random().nextInt(1000000);
+							ByteArrayOutputStream outputStream = new ByteArrayOutputStream();
+							if (!ImageIO.write(bufferedImage, "png", outputStream)) {
+								log.warn("Failed to encode screenshot as PNG");
+								return;
+							}
+							byte[] imageBytes = outputStream.toByteArray();
+
 							String payload = String.format(
 									"{\"content\": \"🎉 %s %s **%s** from %s 🎉   *Value: %s GP*\"}",
 									client.getLocalPlayer().getName(),
@@ -137,29 +120,46 @@ public class LootFlexerPlugin extends Plugin
 									String.format("%,d", totalValue)
 							);
 							log.debug(payload);
-							byte[] body = buildMultipartBody(payload, tempFile, boundary);
 
-							HttpRequest request = HttpRequest.newBuilder()
-									.uri(URI.create(webhookUrl))
-									.header("Content-Type", "multipart/form-data; boundary=" + boundary)
-									.POST(HttpRequest.BodyPublishers.ofByteArray(body))
+							RequestBody imageBody = RequestBody.create(MediaType.parse("image/png"), imageBytes);
+							RequestBody body = new MultipartBody.Builder()
+									.setType(MultipartBody.FORM)
+									.addFormDataPart("payload_json", payload)
+									.addFormDataPart("file", "drop.png", imageBody)
 									.build();
 
-							HTTP_CLIENT.sendAsync(request, HttpResponse.BodyHandlers.discarding())
-									.thenAccept(response -> {
-										if (response.statusCode() != 200 && response.statusCode() != 204) {
-											log.warn("Discord webhook failed: {}", response.statusCode());
-										}
-									})
-									.exceptionally(e -> {
-										log.error("Failed to post to Discord", e);
-										return null;
-									})
-									.whenComplete((res, err) -> deleteQuietly(finalTempFile));
+							Request request = new Request.Builder()
+									.url(webhookUrl)
+									.header("User-Agent", "LootFlexer/1.0 (+https://github.com/Nares18/loot-flexer)")
+									.post(body)
+									.build();
 
+							okHttpClient.newCall(request).enqueue(new Callback()
+							{
+								@Override
+								public void onResponse(Call call, Response response)
+								{
+									try
+									{
+										if (response.code() != 200 && response.code() != 204)
+										{
+											log.warn("Discord webhook failed: {}", response.code());
+										}
+									}
+									finally
+									{
+										response.close();
+									}
+								}
+
+								@Override
+								public void onFailure(Call call, IOException e)
+								{
+									log.error("Failed to post to Discord", e);
+								}
+							});
 						} catch (IOException e) {
-							log.error("File I/O or request error", e);
-							if (tempFile != null) deleteQuietly(tempFile);
+							log.error("Screenshot encoding or request error", e);
 						}
 					});
 				});
@@ -167,35 +167,6 @@ public class LootFlexerPlugin extends Plugin
 				log.error("Error preparing Discord webhook request", e);
 			}
 		}
-	}
-
-	private void deleteQuietly(Path file) {
-		try {
-			Files.deleteIfExists(file);
-		} catch (IOException e) {
-			log.warn("Failed to delete temp screenshot {}", file, e);
-		}
-	}
-
-	private byte[] buildMultipartBody(String payload, Path imageFile, String boundary) throws IOException {
-		StringBuilder sb = new StringBuilder();
-		sb.append("--").append(boundary).append("\r\n")
-				.append("Content-Disposition: form-data; name=\"payload_json\"\r\n\r\n")
-				.append(payload).append("\r\n");
-
-		sb.append("--").append(boundary).append("\r\n")
-				.append("Content-Disposition: form-data; name=\"file\"; filename=\"drop.png\"\r\n")
-				.append("Content-Type: image/png\r\n\r\n");
-
-		byte[] imageBytes = Files.readAllBytes(imageFile);
-		byte[] prefix = sb.toString().getBytes();
-		byte[] suffix = ("\r\n--" + boundary + "--\r\n").getBytes();
-
-		byte[] fullBody = new byte[prefix.length + imageBytes.length + suffix.length];
-		System.arraycopy(prefix, 0, fullBody, 0, prefix.length);
-		System.arraycopy(imageBytes, 0, fullBody, prefix.length, imageBytes.length);
-		System.arraycopy(suffix, 0, fullBody, prefix.length + imageBytes.length, suffix.length);
-		return fullBody;
 	}
 
 	public String getRandomLootVerb() {
