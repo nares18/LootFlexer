@@ -83,9 +83,9 @@ public class LootFlexerPlugin extends Plugin
 
 			ItemComposition def = client.getItemDefinition(itemId);
 			log.debug(String.format("got drop: %s",def.getName()));
-			int gePrice = itemManager.getItemPrice(itemId);
-            int totalValue = gePrice * quantity;
-			if (totalValue < config.getMinValue()) {
+			long gePrice = itemManager.getItemPrice(itemId);
+            long totalValue = gePrice * quantity;
+			if ((int)totalValue < config.getMinValue()) {
 				log.debug(String.format("Skipping drop: Value of %d is below threshold of %d",totalValue,config.getMinValue()));
 				continue;
 			}
@@ -99,22 +99,20 @@ public class LootFlexerPlugin extends Plugin
 
 			try {
 				drawManager.requestNextFrameListener(image -> {
-					// 2. Offload the file writing to a background thread to prevent game lag
 					executor.submit(() -> {
+						Path tempFile = null;
 						try {
-							boolean success = false;
-							Path pluginDir = RuneLite.PLUGINS_DIR.toPath().resolve("loot-flexer");
+							Path pluginDir = RuneLite.RUNELITE_DIR.toPath().resolve("loot-flexer");
 							Files.createDirectories(pluginDir);
-							Path tempFile = Files.createTempFile(pluginDir, "drop_", ".png");
-							log.debug(String.format("Screenshot location: %s",tempFile.toAbsolutePath()));
-							// 3. Translate the BufferedImage into a PNG file
-							// Cast the generic Image to a BufferedImage (which implements RenderedImage)
+							tempFile = Files.createTempFile(pluginDir, "drop_", ".png");
+							final Path finalTempFile = tempFile;
+							log.debug("Screenshot location: {}", tempFile.toAbsolutePath());
+
+							BufferedImage bufferedImage;
 							if (image instanceof BufferedImage) {
-								BufferedImage bufferedImage = (BufferedImage) image;
-								success = ImageIO.write(bufferedImage, "png", tempFile.toFile());
+								bufferedImage = (BufferedImage) image;
 							} else {
-								// Safe fallback conversion if it isn't an instance of BufferedImage
-								BufferedImage bufferedImage = new BufferedImage(
+								bufferedImage = new BufferedImage(
 										image.getWidth(null),
 										image.getHeight(null),
 										BufferedImage.TYPE_INT_ARGB
@@ -122,57 +120,60 @@ public class LootFlexerPlugin extends Plugin
 								Graphics2D g2d = bufferedImage.createGraphics();
 								g2d.drawImage(image, 0, 0, null);
 								g2d.dispose();
-
-								success = ImageIO.write(bufferedImage, "png", tempFile.toFile());
 							}
-							if (success) {
-								// PNG successfully saved
-								String boundary = "----WebKitFormBoundary" + new Random().nextInt(1000000);
-								String payload = String.format(
-										"{\"content\": \"🎉 %s %s **%s** from %s 🎉   *Value: %s GP*\"}",
-										client.getLocalPlayer().getName(),
-										getRandomLootVerb(),
-										def.getName(),
-										npcName,
-										String.format("%,d", totalValue)
-								);
 
-								log.debug(payload);
-								byte[] body = buildMultipartBody(payload, tempFile, boundary);
-
-								HttpRequest request = HttpRequest.newBuilder()
-										.uri(URI.create(webhookUrl))
-										.header("Content-Type", "multipart/form-data; boundary=" + boundary)
-										.POST(HttpRequest.BodyPublishers.ofByteArray(body))
-										.build();
-
-								HTTP_CLIENT.sendAsync(request, HttpResponse.BodyHandlers.discarding())
-										.thenAccept(response -> {
-											if (response.statusCode() != 200 && response.statusCode() != 204) {
-												log.warn("Discord webhook failed: {}", response.statusCode());
-											}
-										})
-										.exceptionally(e -> {
-											log.error("Failed to post to Discord", e);
-											return null;
-										})
-										.whenComplete((res, err) -> {
-											try {
-												Files.deleteIfExists(tempFile);
-											} catch (IOException e) {
-												log.warn("Failed to delete temp screenshot", e);
-											}
-										});
+							if (!ImageIO.write(bufferedImage, "png", tempFile.toFile())) {
+								Files.deleteIfExists(tempFile);
+								return;
 							}
+
+							String boundary = "----WebKitFormBoundary" + new Random().nextInt(1000000);
+							String payload = String.format(
+									"{\"content\": \"🎉 %s %s **%s** from %s 🎉   *Value: %s GP*\"}",
+									client.getLocalPlayer().getName(),
+									getRandomLootVerb(),
+									def.getName(),
+									npcName,
+									String.format("%,d", totalValue)
+							);
+							log.debug(payload);
+							byte[] body = buildMultipartBody(payload, tempFile, boundary);
+
+							HttpRequest request = HttpRequest.newBuilder()
+									.uri(URI.create(webhookUrl))
+									.header("Content-Type", "multipart/form-data; boundary=" + boundary)
+									.POST(HttpRequest.BodyPublishers.ofByteArray(body))
+									.build();
+
+							HTTP_CLIENT.sendAsync(request, HttpResponse.BodyHandlers.discarding())
+									.thenAccept(response -> {
+										if (response.statusCode() != 200 && response.statusCode() != 204) {
+											log.warn("Discord webhook failed: {}", response.statusCode());
+										}
+									})
+									.exceptionally(e -> {
+										log.error("Failed to post to Discord", e);
+										return null;
+									})
+									.whenComplete((res, err) -> deleteQuietly(finalTempFile));
 
 						} catch (IOException e) {
-							log.error(e.getMessage(), e);
+							log.error("File I/O or request error", e);
+							if (tempFile != null) deleteQuietly(tempFile);
 						}
 					});
 				});
 			} catch (Exception e) {
 				log.error("Error preparing Discord webhook request", e);
 			}
+		}
+	}
+
+	private void deleteQuietly(Path file) {
+		try {
+			Files.deleteIfExists(file);
+		} catch (IOException e) {
+			log.warn("Failed to delete temp screenshot {}", file, e);
 		}
 	}
 
